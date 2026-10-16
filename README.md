@@ -4,9 +4,14 @@ macOS / Windows 桌面与托盘应用，支持图形化账号管理、每天定�
 
 ## 桌面应用
 
-在仓库的 [Actions](https://github.com/cylemonVip/fib-auto-checkin/actions/workflows/desktop-build.yml) 中选择成功的构建，下载对应的 `FIB-Checkin-windows-latest` 或 `FIB-Checkin-macos-14` artifact。
+从 [GitHub Releases](https://github.com/cylemonVip/fib-auto-checkin/releases/latest) 直接下载应用，无需安装 Python：
 
-解压 artifact 后，再解压其中的应用 ZIP。Windows 双击文件夹中的 `FIB Checkin.exe`，请保留旁边的运行库；macOS 双击 `FIB Checkin.app`。应用不需要另行安装 Python，添加或重新登录账号时需要电脑已安装 Google Chrome。
+| 平台 | 下载 | 使用方式 |
+| --- | --- | --- |
+| Windows 64 位 | [下载 Windows 版](https://github.com/cylemonVip/fib-auto-checkin/releases/latest/download/FIB-Checkin-Windows-x64.zip) | 解压后双击 `FIB Checkin.exe`，保留同目录运行库 |
+| macOS 14+，Apple Silicon | [下载 macOS 版](https://github.com/cylemonVip/fib-auto-checkin/releases/latest/download/FIB-Checkin-macOS-arm64.zip) | 解压后将 `FIB Checkin.app` 移入“应用程序”，双击启动 |
+
+添加或重新登录账号时需要电脑已安装 Google Chrome。当前 macOS 包使用开发签名，未做 Apple 分发公证；首次启动若被系统拦截，请在“系统设置 → 隐私与安全性”中为这个已下载的应用选择“仍要打开”。Windows 包未做商业代码签名，可能显示发布者未验证提示。
 
 - 添加账号时打开独立 Chrome 登录窗口，手动登录后自动保存会话；不保存密码。
 - 日常签到不需要 Chrome 保持打开。
@@ -70,5 +75,7 @@ python ci_smoke.py
 ```
 
 在目标操作系统上构建应用，结果位于 `release/`。推送 `desktop-v*` 标签或手动运行 GitHub Actions，会分别在 macOS / Windows runner 执行离线测试、打包和打包后启动检查。
+
+正式发布使用 **Publish verified desktop release** 工作流：将成功构建的 run ID、源码提交和应用包 SHA-256 记录在 `.github/releases/<版本>.json`，附上同名发布说明，再推送对应的 `v*` 标签。工作流校验构建结果和文件哈希后，把应用包与 `SHA256SUMS.txt` 上传到 Releases。
 
 测试仅使用临时账号夹具；启动检查使用隔离目录，只渲染界面和启动 Playwright 本地驱动，不访问 FIB 或签到。

@@ -1,0 +1,8 @@
+{
+  "build_run_id": 38845752512,
+  "source_commit": "ebc6ee7bd7fad86d7ed5cd58ff0bbf64d17c0399",
+  "assets": {
+    "FIB-Checkin-Windows-x64.zip": "d9e8fa9490be2618375180adb8f0931347e891e73c97741ab93f2e371bf1aa25",
+    "FIB-Checkin-macOS-arm64.zip": "dcee2495b01ae75bc3db8654fffebe29bb0bf798c981499c757ac49e027e0597"
+  }
+}

@@ -4,7 +4,7 @@
 
 ## 使用
 
-macOS 双击 `dist/FIB Checkin.app`。Windows 解压对应平台构建的 ZIP 后，双击文件夹中的 `FIB Checkin.exe`；请保留同目录的运行库文件。
+从 [GitHub Releases](https://github.com/cylemonVip/fib-auto-checkin/releases/latest) 下载对应平台的应用 ZIP。macOS 解压后将 `FIB Checkin.app` 移入“应用程序”并双击；Windows 解压后双击文件夹中的 `FIB Checkin.exe`，请保留同目录的运行库文件。应用内置 Python，不需要用户安装开发环境。
 
 已保存账号且启用“启动时直接收起到托盘”时，应用启动后在后台运行。点击 macOS 菜单栏或 Windows 通知区域里的 FIB 图标，选择“显示主窗口”。首次没有账号时会显示账号管理窗口。再次启动应用会唤起已经运行的实例。
 

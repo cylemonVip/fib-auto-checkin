@@ -1,0 +1,81 @@
+name: Publish verified desktop release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version tag with a checked-in release manifest
+        required: true
+        default: v1.0.0
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Read verified release manifest
+        run: |
+          python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          tag = os.environ['RELEASE_TAG']
+          assert re.fullmatch(r'v\d+\.\d+\.\d+(?:[-.][A-Za-z0-9.]+)?', tag), 'Invalid version tag'
+          manifest = json.loads(Path(f'.github/releases/{tag}.json').read_text())
+          run_id = manifest['build_run_id']
+          sha = manifest['source_commit']
+          assert type(run_id) is int and run_id > 0
+          assert re.fullmatch(r'[0-9a-f]{40}', sha)
+          assert set(manifest['assets']) == {'FIB-Checkin-Windows-x64.zip', 'FIB-Checkin-macOS-arm64.zip'}
+          assert all(re.fullmatch(r'[0-9a-f]{64}', value) for value in manifest['assets'].values())
+          assert Path(f'.github/releases/{tag}.md').is_file()
+          with Path(os.environ['GITHUB_ENV']).open('a') as output:
+              output.write(f'BUILD_RUN_ID={run_id}\nSOURCE_SHA={sha}\n')
+          Path('release').mkdir(exist_ok=True)
+          Path('release/SHA256SUMS.txt').write_text(''.join(f'{sha}  {name}\n' for name, sha in manifest['assets'].items()))
+          PY
+      - name: Verify successful source build
+        run: |
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN_ID" > "$RUNNER_TEMP/fib-build.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          run = json.loads((Path(os.environ['RUNNER_TEMP']) / 'fib-build.json').read_text())
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Build has not succeeded'
+          assert run['head_sha'] == os.environ['SOURCE_SHA'], 'Unexpected build commit'
+          assert run['path'] == '.github/workflows/desktop-build.yml', 'Unexpected build workflow'
+          PY
+      - name: Download tested Windows package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: FIB-Checkin-windows-latest
+          path: release
+          run-id: ${{ env.BUILD_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Download tested macOS package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: FIB-Checkin-macos-14
+          path: release
+          run-id: ${{ env.BUILD_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Verify application package checksums
+        working-directory: release
+        run: sha256sum --check SHA256SUMS.txt
+      - name: Publish applications to GitHub Releases
+        run: |
+          gh release create "$RELEASE_TAG" \
+            release/FIB-Checkin-Windows-x64.zip \
+            release/FIB-Checkin-macOS-arm64.zip \
+            release/SHA256SUMS.txt \
+            --verify-tag --latest \
+            --title "FIB 签到助手 $RELEASE_TAG" \
+            --notes-file ".github/releases/$RELEASE_TAG.md"
