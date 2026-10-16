@@ -1,0 +1,12 @@
+.state/
+.users/
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+artifacts/
+release/
+assets/app.png
+assets/app.icns
+assets/app.ico
