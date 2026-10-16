@@ -54,6 +54,8 @@ python ci_smoke.py
 
 构建使用 PyInstaller，运行包内置 Python、Qt 和 Playwright 驱动。Chrome 不内置，添加账号时使用电脑上已安装的 Chrome。
 
+应用内置 Noto Sans SC 字体，保证系统未安装中文字体时界面也能正确显示。字体来源为 Google Fonts，OFL 许可证随应用保存在 `assets/fonts/OFL.txt`。
+
 macOS 构建生成 `dist/FIB Checkin.app` 和 `release/FIB-Checkin-macOS-<架构>.zip`。本机构建为 Apple Silicon 版本，Qt 运行库要求 macOS 14 或更新版本；Intel Mac 应在 Intel 环境重新构建。当前为本地开发签名，未做 Apple 分发公证。
 
 Windows 构建生成 `dist/FIB Checkin/FIB Checkin.exe` 和 `release/FIB-Checkin-Windows-x64.zip`。请在 Windows x64、Python 3.12 环境构建；macOS 无法用 PyInstaller 直接生成 Windows 可执行文件。
@@ -62,6 +64,6 @@ Windows 构建生成 `dist/FIB Checkin/FIB Checkin.exe` 和 `release/FIB-Checkin
 
 ## 验证范围
 
-离线测试覆盖账号管理、每日防重复、并发锁、调度触发、重启后不重复调度、睡眠补签、设置持久化、旧版数据迁移和 Qt 后台任务。测试不会发送真实签到请求。macOS 应用另外执行本机界面与打包运行验证；Windows 的原生运行和打包需在 Windows runner 或电脑上验证。
+离线测试覆盖账号管理、每日防重复、并发锁、调度触发、重启后不重复调度、睡眠补签、设置持久化、旧版数据迁移和 Qt 后台任务。测试不会发送真实签到请求。macOS 应用另外执行本机界面与打包运行验证；Windows 原生构建和打包启动检查由 GitHub Actions 的 Windows runner 执行。两平台均检查打包后的三个界面、内置字体的中英文字形和 Playwright 驱动初始化，并保存截图与检查报告。
 
 实现参考：[Qt 托盘接口](https://doc.qt.io/qtforpython-6/PySide6/QtWidgets/QSystemTrayIcon.html)、[PyInstaller 的平台构建说明](https://pyinstaller.org/en/stable/usage.html#supporting-multiple-operating-systems)、[Playwright 打包说明](https://playwright.dev/python/docs/library#pyinstaller)。

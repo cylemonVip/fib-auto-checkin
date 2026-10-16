@@ -16,7 +16,7 @@ import threading
 import os
 
 from PySide6.QtCore import QLockFile, QSize, Qt, QTime, QTimer, Signal, QThread
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QIcon, QKeySequence, QFontDatabase, QRawFont
 from PySide6.QtCore import QUrl
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
@@ -33,6 +33,19 @@ from fib_storage import initialize_data, private_dir, atomic_json
 
 
 ASSETS = Path(__file__).resolve().parent / "assets"
+
+
+def configure_font(app):
+    font_id = QFontDatabase.addApplicationFont(str(ASSETS / "fonts/NotoSansSC.ttf"))
+    families = QFontDatabase.applicationFontFamilies(font_id)
+    if font_id < 0 or not families:
+        raise ValueError("内置字体加载失败，请重新解压完整的应用包。")
+    font = QFont(families[0], 10)
+    font.setWeight(QFont.Weight.Normal)
+    app.setFont(font)
+    return families[0]
+
+
 STYLE = """
 QWidget { color: #183442; font-size: 13px; }
 QMainWindow, QWidget#content { background: #F3F6F8; }
@@ -613,6 +626,9 @@ def smoke_test(app, root):
         window.timer.stop()
         if window.current_rows or window.settings["enabled"]:
             raise ValueError("smoke test requires an empty isolated data directory")
+        raw_font = QRawFont.fromFont(app.font())
+        if not all(raw_font.supportsCharacter(ord(char)) for char in "FIB09签到助手"):
+            raise ValueError("bundled font cannot render Latin digits or Chinese UI text")
         window.show()
         for index, name in enumerate(("accounts", "schedule", "logs")):
             window.switch_page(index)
@@ -625,7 +641,7 @@ def smoke_test(app, root):
                 raise RuntimeError("Playwright driver failed to initialize")
         if list((root / ".state").glob("*.json")):
             raise RuntimeError("smoke test unexpectedly created a checkin record")
-        result.update(ok=True, pages=3, playwright_driver=True, signup_requests=0)
+        result.update(ok=True, pages=3, playwright_driver=True, signup_requests=0, font_family=raw_font.familyName(), chinese_glyphs=True)
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
     finally:
@@ -646,12 +662,12 @@ def main(argv=None):
     if args.smoke_test and (not os.environ.get("FIB_DATA_DIR") or os.environ.get("QT_QPA_PLATFORM") != "offscreen"):
         parser.error("--smoke-test requires FIB_DATA_DIR and QT_QPA_PLATFORM=offscreen")
     app = QApplication(sys.argv[:1])
-    app.setFont(QFont("PingFang SC" if sys.platform == "darwin" else "Microsoft YaHei UI", 10))
     app.setApplicationName("FIB Checkin")
     app.setApplicationDisplayName("FIB 签到助手")
     app.setOrganizationName("FIB Checkin")
     app.setQuitOnLastWindowClosed(False)
     try:
+        configure_font(app)
         root = initialize_data()
         if args.smoke_test:
             return smoke_test(app, root)

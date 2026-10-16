@@ -15,11 +15,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTime
+from PySide6.QtGui import QRawFont
 import fib_checkin as core
 import fib_users as users
 import fib_storage as storage
 from fib_desktop_model import DesktopStore, TZ
-from fib_desktop import MainWindow
+from fib_desktop import MainWindow, configure_font
 from test_fib_users import cookies, identity
 
 
@@ -137,6 +138,7 @@ class DesktopTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+        configure_font(cls.app)
         cls.app.setQuitOnLastWindowClosed(False)
 
     def setUp(self):
@@ -178,6 +180,10 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(self.window.table.rowCount(), 1)
         self.assertIn("测试账号", self.window.table.item(0, 0).text())
         self.assertEqual(self.window.metrics[1].text(), "0")
+
+    def test_bundled_font_supports_ui_text(self):
+        font = QRawFont.fromFont(self.app.font())
+        self.assertTrue(all(font.supportsCharacter(ord(char)) for char in "FIB09签到助手"))
 
     def test_accessible_navigation_changes_page_on_checked_state(self):
         self.window.nav_group.button(2).setChecked(True)
