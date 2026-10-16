@@ -66,7 +66,7 @@ def main():
         subprocess.run(["/usr/bin/ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app_path), str(destination)], check=True)
     else:
         destination = Path(shutil.make_archive(str(release / "FIB-Checkin-Windows-x64"), "zip", root_dir=ROOT / "dist", base_dir=NAME))
-    print(f"应用构建完成：{destination}")
+    print(f"Build completed: {destination}")
 
 
 if __name__ == "__main__":
