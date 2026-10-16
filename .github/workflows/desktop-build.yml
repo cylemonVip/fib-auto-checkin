@@ -27,6 +27,13 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
       - run: python build_desktop.py
+      - name: Prepare isolated test keychain
+        if: runner.os == 'macOS'
+        run: |
+          security create-keychain -p fib-ci-tests "$RUNNER_TEMP/fib-ci.keychain-db"
+          security default-keychain -d user -s "$RUNNER_TEMP/fib-ci.keychain-db"
+          security list-keychains -d user -s "$RUNNER_TEMP/fib-ci.keychain-db"
+          security unlock-keychain -p fib-ci-tests "$RUNNER_TEMP/fib-ci.keychain-db"
       - name: Verify packaged application startup
         run: python ci_smoke.py
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

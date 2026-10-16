@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import sys
 from zoneinfo import ZoneInfo
+from urllib.parse import urljoin, urlsplit
 from fib_storage import atomic_json, data_root, file_lock, initialize_data
 
 try:
@@ -44,6 +45,10 @@ class SafeStop(Exception):
     """预检查未通过，此时不能提交签到。"""
 
 
+class AuthExpired(SafeStop):
+    """已确认会话缺失/过期；仅在签到提交之前允许恢复登录。"""
+
+
 def chrome_cookies(profile: str):
     if Path(profile).name != profile or profile in {".", ".."}:
         raise SafeStop("Chrome 配置名称无效。")
@@ -70,7 +75,7 @@ def account_cookies(original):
     names = {part.split("=", 1)[0].strip() for part in selected.split(";") if "=" in part}
     uids = {c.value for c in jar if c.name == "uid" and c.value}
     if not {"uid", "key"} <= names or len(uids) != 1:
-        raise SafeStop("没有有效的 FIB 登录态，请通过 add user 重新登录该账号。")
+        raise AuthExpired("没有有效的 FIB 登录态，请通过 add user 重新登录该账号或启用自动登录。")
     account = hashlib.sha256((SITE + "\0" + next(iter(uids))).encode()).hexdigest()[:20]
     return jar, account
 
@@ -87,6 +92,8 @@ def new_session(cookies):
 def page_status(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     title = soup.title.get_text(" ", strip=True) if soup.title else ""
+    if "FIB ACCELERATE" in title and "登录" in title:
+        raise AuthExpired("网站登录会话已失效。")
     if "FIB ACCELERATE" not in title or "用户中心" not in title:
         raise SafeStop("未收到 FIB 用户中心，登录可能已失效。")
     heading = soup.find("h3", string=lambda s: bool(s and s.strip() == "节点订阅链接"))
@@ -104,6 +111,9 @@ def page_status(html: str) -> str:
 
 def read_home(session):
     response = session.get(HOME_URL, timeout=TIMEOUT, allow_redirects=False)
+    target = urlsplit(urljoin(HOME_URL, response.headers.get("Location", "")))
+    if response.status_code == 401 or (response.status_code in {301, 302, 303, 307, 308} and target.hostname == HOST and target.path.rstrip("/") == "/auth/login"):
+        raise AuthExpired("网站登录会话已失效。")
     if response.status_code != 200:
         raise SafeStop(f"用户中心返回 HTTP {response.status_code}，请检查登录和网络。")
     return response, page_status(response.text)
@@ -249,6 +259,35 @@ def run(session, account: str, dry_run: bool) -> int:
         return 3
 
 
+def run_saved_account(account, user, dry_run):
+    def attempt(current):
+        jar, actual = account_cookies(fib_users.deserialize_cookies(current["cookies"]))
+        if actual != account:
+            raise SafeStop("保存的会话与账号 ID 不一致，请重新添加该账号。")
+        with new_session(jar) as session:
+            code = run(session, account, dry_run)
+            if not dry_run:
+                try:
+                    updated, actual = account_cookies(session.cookies)
+                    if actual != account:
+                        raise SafeStop("服务器返回的会话账号发生变化，未保存该会话。")
+                    fib_users.refresh_user(account, updated, expected_updated_at=current.get("updated_at"))
+                except (SafeStop, fib_users.UserError, OSError, ValueError):
+                    print("处理结束后的会话保存失败，未恢复登录或重发签到；请检查当天结果。", file=sys.stderr)
+                    return 3 if code == 3 else 2
+            return code
+    try:
+        return attempt(user)
+    except AuthExpired:
+        if dry_run or not user.get("auto_login"):
+            raise
+        import fib_auth
+        print("登录会话已失效，正在恢复登录（不会重复提交签到）……", flush=True)
+        refreshed = fib_auth.restore(account)
+        print("自动登录成功，已核对账号；继续检查当天签到状态。", flush=True)
+        return attempt(refreshed)
+
+
 def check_saved_users(selector=None, dry_run=False, on_result=None) -> int:
     users = fib_users.list_users()
     if not users:
@@ -260,16 +299,7 @@ def check_saved_users(selector=None, dry_run=False, on_result=None) -> int:
         code = 2
         print(f"[{number}/{len(accounts)}] {user['name']}：", flush=True)
         try:
-            jar, actual = account_cookies(fib_users.deserialize_cookies(user["cookies"]))
-            if actual != account:
-                raise SafeStop("保存的会话与账号 ID 不一致，请重新添加该账号。")
-            with new_session(jar) as session:
-                code = run(session, account, dry_run)
-                if not dry_run:
-                    updated, actual = account_cookies(session.cookies)
-                    if actual != account:
-                        raise SafeStop("服务器返回的会话账号发生变化，未保存该会话。")
-                    fib_users.refresh_user(account, updated, expected_updated_at=user.get("updated_at"))
+            code = run_saved_account(account, user, dry_run)
         except (SafeStop, fib_users.UserError) as error:
             print(f"  停止：{error}", file=sys.stderr)
             code = 3 if code == 3 else 2
@@ -303,6 +333,11 @@ def build_parser():
     delete_user.add_argument("name", help="账号名称或 list users 中显示的 ID")
     listing = commands.add_parser("list", help="查看已保存的账号")
     listing.add_subparsers(dest="resource", required=True).add_parser("users")
+    auto = commands.add_parser("autologin", help="配置保存在系统凭据库的自动登录密码")
+    auto_user = auto.add_subparsers(dest="resource", required=True).add_parser("user")
+    auto_user.add_argument("name", help="已保存的账号名称或 ID")
+    auto_user.add_argument("--email", help="FIB 登录邮箱；省略时在终端输入")
+    auto_user.add_argument("--disable", action="store_true", help="关闭自动登录并删除系统保存的密码")
     checkin = commands.add_parser("checkin", help="签到；默认执行全部已保存账号")
     selection = checkin.add_mutually_exclusive_group()
     selection.add_argument("--all", action="store_true", help="签到全部已保存账号（默认）")
@@ -315,15 +350,32 @@ def build_parser():
 def main(argv=None, on_result=None, cancel_event=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command in {"add", "delete", "list"} and args.dry_run:
+    if args.command in {"add", "delete", "list", "autologin"} and args.dry_run:
         parser.error("--dry-run 只用于签到，不用于账号管理。")
-    if args.command in {"delete", "list"} and args.chrome_profile:
+    if args.command in {"delete", "list", "autologin"} and args.chrome_profile:
         parser.error("此命令不使用 --chrome-profile。")
     if args.command == "checkin" and args.chrome_profile and (args.all or args.user):
         parser.error("--chrome-profile 不能与 --all 或 --user 一起使用。")
     if args.command == "add" and args.chrome_profile and not args.from_chrome:
         parser.error("--chrome-profile 仅用于 add user --from-chrome 导入。")
     try:
+        if args.command == "autologin":
+            import fib_auth
+            import getpass
+            saved = fib_users.list_users()
+            account = fib_users.resolve_user(saved, args.name)
+            if args.disable:
+                fib_auth.disable(account)
+                print("已关闭自动登录，并删除系统保存的密码；签到记录保留。")
+            else:
+                email = args.email or input("FIB 登录邮箱：").strip()
+                password = getpass.getpass("FIB 登录密码（不显示）：")
+                try:
+                    fib_auth.configure(account, email, password)
+                finally:
+                    password = None
+                print("登录验证成功，已启用自动登录，密码仅保存在系统凭据库；未执行签到。")
+            return 0
         if args.command == "add":
             if args.name is not None:
                 args.name = fib_users.validate_name(args.name)

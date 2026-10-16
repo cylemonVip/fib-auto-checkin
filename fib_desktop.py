@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
     QPushButton, QStackedWidget, QSystemTrayIcon, QTableWidget, QTableWidgetItem,
     QTimeEdit, QVBoxLayout, QWidget,
+    QDialog, QDialogButtonBox, QFormLayout, QLineEdit,
 )
 
 import fib_checkin as core
@@ -125,13 +126,14 @@ class OutputStream(io.TextIOBase):
 class Task(QThread):
     line = Signal(str)
 
-    def __init__(self, argv, store, parent=None):
+    def __init__(self, argv, store, parent=None, auth_request=None):
         super().__init__(parent)
         self.argv = argv
         self.store = store
         self.code = 2
         self.cancel_event = threading.Event()
         self.is_login = argv[:2] == ["add", "user"]
+        self.auth_request = auth_request
 
     def run(self):
         stream = OutputStream(self.line.emit)
@@ -140,12 +142,82 @@ class Task(QThread):
             self.store.record_result(account, code, dry_run=dry_run)
         try:
             with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):
-                self.code = core.main(self.argv, on_result=record, cancel_event=self.cancel_event)
+                if self.auth_request is not None:
+                    import fib_auth
+                    account, email, password, enabled = self.auth_request
+                    if enabled:
+                        fib_auth.configure(account, email, password)
+                        print("验证成功，已启用自动登录；密码已存入系统凭据库，未执行签到。")
+                    else:
+                        fib_auth.disable(account)
+                        print("已关闭自动登录，并删除系统保存的密码；签到记录保留。")
+                    self.code = 0
+                else:
+                    self.code = core.main(self.argv, on_result=record, cancel_event=self.cancel_event)
+        except (users.UserError, core.SafeStop) as error:
+            self.line.emit(str(error))
+            self.code = 2
         except Exception as error:
             self.line.emit(f"任务异常（{type(error).__name__}）。请查看账号状态；不会补发签到请求。")
             self.code = 2
         finally:
+            self.auth_request = None
             stream.flush()
+
+
+class AutoLoginDialog(QDialog):
+    def __init__(self, user, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("配置自动登录")
+        self.setMinimumWidth(460)
+        layout = QVBoxLayout(self)
+        title = label("会话过期后自动重新登录", "section")
+        layout.addWidget(title)
+        description = label("启用后，应用仅在签到前发现会话失效时，用保存的密码恢复登录并勾选“记住我”。", "muted")
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        self.enabled = QCheckBox("允许保存密码并自动重新登录")
+        self.enabled.setChecked(bool(user.get("auto_login")))
+        layout.addWidget(self.enabled)
+        form = QFormLayout()
+        self.email = QLineEdit(user.get("login_email") or user.get("email", ""))
+        self.email.setPlaceholderText("FIB 登录邮箱")
+        self.password = QLineEdit()
+        self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password.setMaxLength(1024)
+        self.password.setPlaceholderText("输入密码以验证并保存")
+        form.addRow("邮箱", self.email)
+        form.addRow("密码", self.password)
+        layout.addLayout(form)
+        note = label("密码仅保存在 macOS 钥匙串或 Windows 凭据管理器；不会写入账号 JSON、日志或上传 GitHub。关闭自动登录或移除账号时会删除保存的密码。", "muted")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        note = label("保存时会验证一次登录，不执行签到。密码错误、两步验证或人工验证码会停止自动恢复；自动恢复尝试间隔至少 30 分钟。", "muted")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.button(QDialogButtonBox.StandardButton.Save).setText("验证并保存")
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+        self.enabled.toggled.connect(self.update_fields)
+        self.update_fields(self.enabled.isChecked())
+
+    def update_fields(self, enabled):
+        self.email.setEnabled(enabled)
+        self.password.setEnabled(enabled)
+        self.buttons.button(QDialogButtonBox.StandardButton.Save).setText("验证并保存" if enabled else "关闭并删除密码")
+
+    def accept(self):
+        if self.enabled.isChecked():
+            try:
+                import fib_auth
+                fib_auth.validate_credentials(self.email.text(), self.password.text())
+            except users.UserError as error:
+                QMessageBox.warning(self, "无法保存", str(error))
+                return
+        super().accept()
 
 
 class MainWindow(QMainWindow):
@@ -294,18 +366,19 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.empty)
         selected = QHBoxLayout()
         self.relogin_button = button("重新登录", self.relogin)
+        self.auto_login_button = button("自动登录", self.configure_auto_login)
         self.rename_button = button("重命名", self.rename)
         self.single_button = button("签到选中账号", self.check_selected)
         self.delete_button = button("移除账号", self.delete)
         self.delete_button.setObjectName("danger")
-        for item in (self.relogin_button, self.rename_button, self.single_button):
+        for item in (self.relogin_button, self.auto_login_button, self.rename_button, self.single_button):
             selected.addWidget(item)
         selected.addStretch()
         selected.addWidget(self.delete_button)
-        self.selection_controls = [self.relogin_button, self.rename_button, self.single_button, self.delete_button]
+        self.selection_controls = [self.relogin_button, self.auto_login_button, self.rename_button, self.single_button, self.delete_button]
         self.controls.extend(self.selection_controls)
         layout.addLayout(selected)
-        note = label("每个账号每天最多提交一次。会话过期时，可选择账号并重新登录。", "muted")
+        note = label("每个账号每天最多提交一次。启用“自动登录”可在会话过期后恢复登录；也可手动重新登录。", "muted")
         note.setWordWrap(True)
         layout.addWidget(note)
         return page
@@ -426,7 +499,7 @@ class MainWindow(QMainWindow):
                 if column == 2:
                     item.setForeground(QColor("#147E6E" if value == "已签到" else "#A56B29" if "确认" in value or "处理" in value and value != "尚未处理" else "#718591"))
                 self.table.setItem(index, column, item)
-            self.table.setRowHeight(index, 68)
+            self.table.setRowHeight(index, 82)
             if row["id"] == old:
                 self.table.selectRow(index)
         self.empty.setVisible(not self.current_rows)
@@ -487,6 +560,24 @@ class MainWindow(QMainWindow):
         if selected:
             self.start_task(["add", "user", selected["name"]], f"重新登录 {selected['name']}")
 
+    def configure_auto_login(self):
+        selected = self.selected()
+        if not selected:
+            return
+        try:
+            user = users.list_users()[selected["id"]]
+        except (KeyError, users.UserError, OSError):
+            QMessageBox.warning(self, "账号不可用", "请刷新账号列表后重试。")
+            return
+        dialog = AutoLoginDialog(user, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            enabled = dialog.enabled.isChecked()
+            request = (selected["id"], dialog.email.text().strip(), dialog.password.text() if enabled else "", enabled)
+            dialog.password.clear()
+            self.start_task([], "验证并保存自动登录" if enabled else "关闭自动登录", auth_request=request)
+        dialog.password.clear()
+        dialog.deleteLater()
+
     def rename(self):
         selected = self.selected()
         if not selected:
@@ -521,7 +612,7 @@ class MainWindow(QMainWindow):
         self.logger.info(text)
         self.logs.appendPlainText(f"[{datetime.now(TZ).strftime('%H:%M:%S')}] {text}")
 
-    def start_task(self, argv, title):
+    def start_task(self, argv, title, auth_request=None):
         if self.worker is not None or self.pending_quit:
             return False
         self.status.setText(title)
@@ -530,7 +621,7 @@ class MainWindow(QMainWindow):
             widget.setEnabled(False)
         self.tray_check.setEnabled(False)
         self.tray_dry.setEnabled(False)
-        self.worker = Task(argv, self.store, self)
+        self.worker = Task(argv, self.store, self, auth_request=auth_request)
         self.worker.line.connect(self.log)
         self.worker.finished.connect(self._task_finished)
         self.cancel_login.setVisible(self.worker.is_login)
@@ -620,6 +711,7 @@ class MainWindow(QMainWindow):
 def smoke_test(app, root):
     """只渲染界面和启动本地驱动；不得登录或发起签到。"""
     window = None
+    dialog = None
     result = {"ok": False, "packaged": bool(getattr(sys, "frozen", False)), "platform": sys.platform}
     try:
         window = MainWindow(DesktopStore(root), tray_enabled=False)
@@ -635,16 +727,34 @@ def smoke_test(app, root):
             app.processEvents()
             if not window.grab().save(str(root / f"smoke-{name}.png")):
                 raise OSError("cannot save smoke screenshot")
+        dialog = AutoLoginDialog({}, window)
+        dialog.enabled.setChecked(True)
+        dialog.show()
+        app.processEvents()
+        if not dialog.grab().save(str(root / "smoke-auto-login.png")):
+            raise OSError("cannot save auto login dialog screenshot")
+        if dialog.password.echoMode() != QLineEdit.EchoMode.Password:
+            raise RuntimeError("auto login password field is not masked")
+        import fib_credentials
+        credential_backend = type(fib_credentials.backend()).__name__
+        try:
+            fib_credentials.save("smoke-credential", "smoke@example.invalid", "isolated-offline-smoke")
+            if fib_credentials.load("smoke-credential") != ("smoke@example.invalid", "isolated-offline-smoke"):
+                raise RuntimeError("system credential roundtrip failed")
+        finally:
+            fib_credentials.delete("smoke-credential")
         from playwright.sync_api import sync_playwright
         with sync_playwright() as playwright:
             if playwright.chromium.name != "chromium":
                 raise RuntimeError("Playwright driver failed to initialize")
         if list((root / ".state").glob("*.json")):
             raise RuntimeError("smoke test unexpectedly created a checkin record")
-        result.update(ok=True, pages=3, playwright_driver=True, signup_requests=0, font_family=raw_font.familyName(), chinese_glyphs=True)
+        result.update(ok=True, pages=3, auto_login_dialog=True, credential_backend=credential_backend, credential_roundtrip=True, playwright_driver=True, signup_requests=0, font_family=raw_font.familyName(), chinese_glyphs=True)
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
     finally:
+        if dialog is not None:
+            dialog.close()
         if window is not None:
             window.close()
             for handler in window.logger.handlers:

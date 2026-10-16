@@ -20,7 +20,7 @@ import fib_checkin as core
 import fib_users as users
 import fib_storage as storage
 from fib_desktop_model import DesktopStore, TZ
-from fib_desktop import MainWindow, configure_font
+from fib_desktop import MainWindow, AutoLoginDialog, configure_font
 from test_fib_users import cookies, identity
 
 
@@ -180,6 +180,35 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(self.window.table.rowCount(), 1)
         self.assertIn("测试账号", self.window.table.item(0, 0).text())
         self.assertEqual(self.window.metrics[1].text(), "0")
+
+    def test_auto_login_dialog_is_opt_in_and_masks_password(self):
+        from PySide6.QtWidgets import QLineEdit
+        dialog = AutoLoginDialog({"email": "test@example.test"}, self.window)
+        self.assertFalse(dialog.enabled.isChecked())
+        self.assertFalse(dialog.password.isEnabled())
+        self.assertEqual(dialog.password.echoMode(), QLineEdit.EchoMode.Password)
+        dialog.enabled.setChecked(True)
+        self.assertTrue(dialog.password.isEnabled())
+        dialog.close()
+
+    def test_auto_login_worker_passes_password_in_memory_without_logging(self):
+        import fib_auth
+        with patch.object(fib_auth, "configure") as configure, patch.object(core, "main") as main:
+            self.window.start_task([], "测试自动登录设置", auth_request=(self.account, "test@example.test", "offline-private-password", True))
+            self.wait_worker()
+        configure.assert_called_once_with(self.account, "test@example.test", "offline-private-password")
+        main.assert_not_called()
+        self.assertNotIn("offline-private-password", self.window.logs.toPlainText())
+
+    def test_session_table_shows_expiration_and_auto_login(self):
+        jar = cookies()
+        for cookie in jar:
+            cookie.expires = int(datetime(2027, 1, 2, 9, 30, tzinfo=TZ).timestamp())
+        users.configure_auto_login(self.account, True, "test@example.test", jar)
+        self.window.refresh()
+        text = self.window.table.item(0, 1).text()
+        self.assertIn("01-02 09:30", text)
+        self.assertIn("可自动重新登录", text)
 
     def test_bundled_font_supports_ui_text(self):
         font = QRawFont.fromFont(self.app.font())

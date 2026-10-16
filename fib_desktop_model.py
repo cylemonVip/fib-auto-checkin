@@ -132,6 +132,12 @@ def account_rows(users, store, state_dir, now=None):
         latest = results.get(account, {})
         if latest.get("check_code") == 2 and latest.get("checked_at", "") > user.get("updated_at", ""):
             session_status = "需要检查会话或网络"
+        expirations = [item.get("expires") for item in user["cookies"] if item.get("name") in {"uid", "key"} and isinstance(item.get("expires"), (int, float)) and item["expires"] > 0]
+        if expirations:
+            expiration = datetime.fromtimestamp(min(expirations), TZ)
+            session_status += "\n到期 " + expiration.strftime("%m-%d %H:%M")
+        if user.get("auto_login"):
+            session_status += "\n可自动重新登录"
         today = "尚未处理"
         last_at = latest.get("checked_at", "")
         checkin = latest.get("checkin", {})

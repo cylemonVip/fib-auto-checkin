@@ -50,6 +50,7 @@ def main():
         "--osx-bundle-identifier", "com.local.fibcheckin",
         str(ROOT / "fib_desktop.py"),
     ]
+    arguments.extend(["--hidden-import", "keyring.backends.macOS" if sys.platform == "darwin" else "keyring.backends.Windows"])
     subprocess.run(arguments, cwd=ROOT, check=True)
     release = ROOT / "release"
     release.mkdir(exist_ok=True)
@@ -58,7 +59,7 @@ def main():
         app_path = ROOT / "dist" / (NAME + ".app")
         info_path = app_path / "Contents/Info.plist"
         info = plistlib.loads(info_path.read_bytes())
-        info.update(LSUIElement=True, CFBundleShortVersionString="1.0.0", CFBundleVersion="1")
+        info.update(LSUIElement=True, CFBundleShortVersionString="1.1.0", CFBundleVersion="2")
         info_path.write_bytes(plistlib.dumps(info))
         # 修改 Info.plist 后重新完成本机 ad-hoc 签名；分发公证需开发者证书。
         subprocess.run(["/usr/bin/codesign", "--force", "--deep", "--sign", "-", str(app_path)], check=True)

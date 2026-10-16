@@ -293,6 +293,7 @@ class LoginWindowTests(unittest.TestCase):
             result = users.capture_login(fib.HOME_URL, lambda jar: (jar, identity(jar), "user@example.test"), timeout=1)
         playwright.chromium.launch.assert_called_once_with(channel="chrome", headless=False, chromium_sandbox=True, timeout=30000)
         guard = context.route.call_args.args[1]
+        self.assertIn("#remember-me", context.add_init_script.call_args.args[0])
         route = MagicMock()
         route.request.url = fib.CHECKIN_URL + "?accidental-click=1"
         guard(route)

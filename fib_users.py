@@ -126,6 +126,8 @@ def save_user(account, jar, name=None, label=""):
             "name": name, "email": label if "@" in label else (existing or {}).get("email", ""),
             "created_at": (existing or {}).get("created_at", now), "updated_at": now,
             "cookies": serialize_cookies(jar),
+            "auto_login": bool((existing or {}).get("auto_login", False)),
+            "login_email": (existing or {}).get("login_email", ""),
         }
         _write(data)
         return name, existing is not None
@@ -145,12 +147,34 @@ def refresh_user(account, jar, expected_updated_at=None):
 
 
 def delete_user(selector):
+    import fib_checkin as core
+    account = resolve_user(list_users(), selector)
+    try:
+        with core.account_lock(account), store_lock():
+            data = _load()
+            if account not in data["users"]:
+                raise UserError("账号已被移除。")
+            user = data["users"][account]
+            if user.get("auto_login") or user.get("login_email"):
+                import fib_credentials
+                fib_credentials.delete(account)
+            name = data["users"].pop(account)["name"]
+            _write(data)
+            return name
+    except core.SafeStop:
+        raise UserBusy("账号正在处理，请稍后移除。") from None
+
+
+def configure_auto_login(account, enabled, email="", jar=None):
     with store_lock():
         data = _load()
-        account = resolve_user(data["users"], selector)
-        name = data["users"].pop(account)["name"]
+        if account not in data["users"]:
+            raise UserError("账号已被移除，未更新自动登录设置。")
+        user = data["users"][account]
+        user.update(auto_login=bool(enabled), login_email=email if enabled else "", updated_at=datetime.now(TZ).isoformat())
+        if jar is not None:
+            user["cookies"] = serialize_cookies(jar)
         _write(data)
-        return name
 
 
 def rename_user(selector, new_name):
@@ -187,6 +211,7 @@ def capture_login(home_url, validate, timeout=600, cancel_event=None):
             try:
                 context = browser.new_context(no_viewport=True, accept_downloads=False, service_workers="block")
                 context.route("**/*", guard)
+                context.add_init_script("document.addEventListener('DOMContentLoaded', () => { const box = document.querySelector('#remember-me'); if (box) box.checked = true; });")
                 page = context.new_page()
                 print("已打开独立 Chrome 窗口，请手动登录 FIB；登录验证成功后会自动保存并关闭该窗口。", flush=True)
                 try:
