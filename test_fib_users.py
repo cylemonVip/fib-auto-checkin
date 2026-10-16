@@ -91,7 +91,7 @@ class UserTests(unittest.TestCase):
         account = self.add()
         fib.STATE_DIR.mkdir()
         history = fib.STATE_DIR / f"{account}-2026-10-16.json"
-        history.write_text('{"status":"pending","attempt_count":1}')
+        history.write_text('{"status":"pending","attempt_count":1}', encoding="utf-8")
         self.assertEqual(users.delete_user("主账号"), "主账号")
         self.assertEqual(users.list_users(), {})
         self.assertTrue(history.exists())
@@ -127,10 +127,10 @@ class UserTests(unittest.TestCase):
     def test_broken_database_is_not_overwritten(self):
         self.add()
         path = users.USER_DIR / "users.json"
-        path.write_text("broken")
+        path.write_text("broken", encoding="utf-8")
         with self.assertRaises(users.UserError):
             self.add("200", "副账号")
-        self.assertEqual(path.read_text(), "broken")
+        self.assertEqual(path.read_text(encoding="utf-8"), "broken")
 
     def test_cookie_filter_excludes_other_sites_and_expired_sessions(self):
         jar = cookies()
@@ -237,7 +237,7 @@ class UserTests(unittest.TestCase):
                 assert url == fib.CHECKIN_URL
                 assert kwargs["allow_redirects"] is False
                 records = list(fib.STATE_DIR.glob(f"{self.account}-*.json"))
-                assert len(records) == 1 and json.loads(records[0].read_text())["status"] == "pending"
+                assert len(records) == 1 and json.loads(records[0].read_text(encoding="utf-8"))["status"] == "pending"
                 self.posts += 1
                 return Response(data={"ret": 1, "msg": "离线签到成功"})
 
@@ -251,7 +251,7 @@ class UserTests(unittest.TestCase):
             self.assertEqual(fib.check_saved_users(), 0)
             self.assertEqual(fib.check_saved_users(), 0)
         self.assertEqual([session.posts for session in sessions.values()], [1, 1])
-        records = [json.loads(p.read_text()) for p in fib.STATE_DIR.glob("*.json")]
+        records = [json.loads(p.read_text(encoding="utf-8")) for p in fib.STATE_DIR.glob("*.json")]
         self.assertEqual(len(records), 2)
         self.assertTrue(all(r["attempt_count"] == 1 and r["status"] == "verified_success" for r in records))
 

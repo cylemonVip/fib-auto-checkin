@@ -65,7 +65,7 @@ class Session:
         assert not kwargs.get("data") and not kwargs.get("json")
         pending = list(fib.STATE_DIR.glob("*.json"))
         assert len(pending) == 1
-        assert json.loads(pending[0].read_text())["status"] == "pending"
+        assert json.loads(pending[0].read_text(encoding="utf-8"))["status"] == "pending"
         self.posts += 1
         if isinstance(self.result, Exception):
             raise self.result
@@ -93,7 +93,7 @@ class CheckinTests(unittest.TestCase):
         self.temp.cleanup()
 
     def records(self):
-        return [json.loads(p.read_text()) for p in fib.STATE_DIR.glob("*.json")]
+        return [json.loads(p.read_text(encoding="utf-8")) for p in fib.STATE_DIR.glob("*.json")]
 
     def test_dry_run_never_posts_or_reserves_attempt(self):
         session = Session()

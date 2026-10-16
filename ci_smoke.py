@@ -29,7 +29,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="fib-ci-") as folder:
         environment = os.environ | {"FIB_DATA_DIR": folder, "QT_QPA_PLATFORM": "offscreen"}
-        completed = subprocess.run(command + ["--smoke-test"], cwd=ROOT, env=environment, capture_output=True, text=True, timeout=90)
+        completed = subprocess.run(command + ["--smoke-test"], cwd=ROOT, env=environment, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90)
         root = Path(folder)
         for source in root.glob("smoke-*"):
             shutil.copy2(source, output / source.name)

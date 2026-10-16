@@ -94,7 +94,7 @@ class ScheduleTests(unittest.TestCase):
 
     def test_corrupted_config_fails_closed(self):
         self.store.root.mkdir(exist_ok=True)
-        self.store.settings_path.write_text("invalid")
+        self.store.settings_path.write_text("invalid", encoding="utf-8")
         with self.assertRaises(ValueError):
             self.store.claim_due(self.morning)
 
@@ -107,11 +107,11 @@ class StorageTests(unittest.TestCase):
             storage.atomic_json(legacy / ".users/users.json", {"version": 1, "users": {"test": {}}})
             with patch.object(storage, "data_root", return_value=target), patch.dict(os.environ, {"FIB_DATA_DIR": ""}):
                 storage.initialize_data(legacy)
-                self.assertEqual(json.loads((target / ".state/account-2026-10-16.json").read_text())["attempt_count"], 1)
+                self.assertEqual(json.loads((target / ".state/account-2026-10-16.json").read_text(encoding="utf-8"))["attempt_count"], 1)
                 self.assertTrue((legacy / ".users/users.json").exists())
                 storage.atomic_json(target / ".users/users.json", {"version": 1, "users": {}})
                 storage.initialize_data(legacy)
-                self.assertEqual(json.loads((target / ".users/users.json").read_text())["users"], {})
+                self.assertEqual(json.loads((target / ".users/users.json").read_text(encoding="utf-8"))["users"], {})
 
     def test_explicit_test_data_directory_never_imports_real_accounts(self):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {"FIB_DATA_DIR": folder}):
